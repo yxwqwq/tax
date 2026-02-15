@@ -376,4 +376,4 @@ func collectTaxFromAllUsers(ctx *zero.Ctx) (int, int) {
         if err := db.InsertTreasuryLog(logEntry); err != nil {
             continue
         }
-      
+      }
