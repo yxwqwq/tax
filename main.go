@@ -377,3 +377,4 @@ func collectTaxFromAllUsers(ctx *zero.Ctx) (int, int) {
             continue
         }
       }
+}
