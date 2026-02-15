@@ -13,9 +13,9 @@ import (
 	"github.com/FloatTech/floatbox/binary"
 	"github.com/FloatTech/floatbox/file"
 	"github.com/FloatTech/floatbox/process"
-	"github.com/FloatTech/zbputils/ctxext"
 	ctrl "github.com/FloatTech/zbpctrl"
 	"github.com/FloatTech/zbputils/control"
+	"github.com/FloatTech/zbputils/ctxext"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"
 	"github.com/sirupsen/logrus"
@@ -64,7 +64,8 @@ func init() {
 	dbFile := engine.DataFolder() + "tax.db"
 	
 	go func() {
-		_ = file.IsNotExistMkDir(cachePath)
+		// 创建缓存目录
+		_ = file.MkdirAll(cachePath)
 		
 		// 初始化数据库
 		err := db.Open(dbFile)
@@ -235,7 +236,7 @@ func autoTaxRoutine() {
 				// 异步保存配置
 				go func() {
 					process.SleepAboutTime(1*time.Second)
-					configFile := control.Lookup[*ctrl.Options[*zero.Ctx]]("tax").DataFolder() + "config.txt"
+					configFile := control.Lookup("tax").DataFolder() + "config.txt"
 					saveConfig(configFile)
 				}()
 			}
@@ -376,5 +377,50 @@ func collectTaxFromAllUsers(ctx *zero.Ctx) (int, int) {
         if err := db.InsertTreasuryLog(logEntry); err != nil {
             continue
         }
-      }
+        
+        count++
+        totalTax += taxAmount
+    }
+
+	return count, totalTax
+}
+
+// 保存配置
+func saveConfig(path string) {
+	taxConfig.RLock()
+	data := fmt.Sprintf("%.4f,%d,%s", taxConfig.TaxRate, taxConfig.Threshold, taxConfig.LastTaxDay)
+	taxConfig.RUnlock()
+	
+	_ = binary.WriteFile([]byte(data), path)
+}
+
+// 加载配置
+func loadConfig(path string) {
+	if !file.IsExist(path) {
+		// 如果配置不存在，使用默认值
+		return
+	}
+
+	data, err := file.GetLazyData(path, false, true)
+	if err != nil {
+		return
+	}
+
+	parts := strings.Split(string(data), ",")
+	if len(parts) >= 2 {
+		taxConfig.Lock()
+		defer taxConfig.Unlock()
+		
+		if rate, err := strconv.ParseFloat(parts[0], 64); err == nil {
+			taxConfig.TaxRate = rate
+		}
+		if threshold, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+			taxConfig.Threshold = threshold
+		}
+	}
+	if len(parts) >= 3 {
+		taxConfig.Lock()
+		taxConfig.LastTaxDay = parts[2]
+		taxConfig.Unlock()
+	}
 }
