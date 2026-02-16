@@ -4,13 +4,13 @@ package tax
 import (
 	"fmt"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/FloatTech/AnimeAPI/wallet"
-	"github.com/FloatTech/floatbox/binary"
 	"github.com/FloatTech/floatbox/file"
 	"github.com/FloatTech/floatbox/process"
 	ctrl "github.com/FloatTech/zbpctrl"
@@ -64,7 +64,7 @@ func init() {
 	dbFile := engine.DataFolder() + "tax.db"
 	
 	go func() {
-		_ = file.MkdirAll(cachePath)
+		_ = os.MkdirAll(cachePath, 0755)
 		
 		// 初始化数据库
 		err := db.Open(dbFile)
@@ -234,10 +234,10 @@ func autoTaxRoutine() {
 				
 				// 异步保存配置
 				go func() {
-					process.SleepAboutTime(1*time.Second)
+					process.SleepAbout1sTo2s()
 					ctrlInfo, ok := control.Lookup("tax")
 					if ok {
-						saveConfig(ctrlInfo.GetDataFolder() + "config.txt")
+						saveConfig(ctrlInfo.DataFolder() + "config.txt")
 					}
 				}()
 			}
@@ -392,7 +392,7 @@ func saveConfig(path string) {
 	data := fmt.Sprintf("%.4f,%d,%s", taxConfig.TaxRate, taxConfig.Threshold, taxConfig.LastTaxDay)
 	taxConfig.RUnlock()
 	
-	_ = binary.WriteFile([]byte(data), path)
+	_ = os.WriteFile(path, []byte(data), 0644)
 }
 
 // 加载配置
@@ -402,7 +402,7 @@ func loadConfig(path string) {
 		return
 	}
 
-	data, err := file.GetLazyData(path, false, true)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return
 	}

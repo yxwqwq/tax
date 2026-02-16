@@ -6,7 +6,7 @@ import (
 )
 
 type TaxDB struct {
-	db sql.Sqlite
+	sql.Sqlite
 }
 
 type TaxRecord struct {
@@ -35,45 +35,45 @@ type TreasuryLog struct {
 }
 
 func (db *TaxDB) Open(dbfile string) error {
-	db.db.File = dbfile
-	return db.db.Open(10)
+	db.File = dbfile
+	return db.Sqlite.Open(10)
 }
 
 func (db *TaxDB) Close() error {
-	return db.db.Close()
+	return db.Sqlite.Close()
 }
 
 func (db *TaxDB) IsExists() bool {
-	return file.IsExist(db.db.File)
+	return file.IsExist(db.File)
 }
 
 func (db *TaxDB) CreateTables() error {
-	err := db.db.Create("tax_records", &TaxRecord{})
+	err := db.Sqlite.Create("tax_records", &TaxRecord{})
 	if err != nil {
 		return err
 	}
 	
-	err = db.db.Create("user_tax_rates", &UserTaxRate{})
+	err = db.Sqlite.Create("user_tax_rates", &UserTaxRate{})
 	if err != nil {
 		return err
 	}
 	
-	return db.db.Create("treasury_logs", &TreasuryLog{})
+	return db.Sqlite.Create("treasury_logs", &TreasuryLog{})
 }
 
 func (db *TaxDB) InsertTaxRecord(record TaxRecord) error {
-	return db.db.Insert("tax_records", &record)
+	return db.Sqlite.Insert("tax_records", &record)
 }
 
 func (db *TaxDB) GetTaxRecordsByUserID(userID int64, limit int) ([]TaxRecord, error) {
 	var records []TaxRecord
-	err := db.db.FindFor("tax_records", &records, "WHERE user_id = ? ORDER BY tax_time DESC LIMIT ?", userID, limit)
+	err := db.Sqlite.FindFor("tax_records", &records, "WHERE user_id = ? ORDER BY tax_time DESC LIMIT ?", userID, limit)
 	return records, err
 }
 
 func (db *TaxDB) GetUserTaxRate(userID, groupID int64) (float64, error) {
 	var rate UserTaxRate
-	err := db.db.Find("user_tax_rates", &rate, "WHERE user_id = ? AND group_id = ?", userID, groupID)
+	err := db.Sqlite.Find("user_tax_rates", &rate, "WHERE user_id = ? AND group_id = ?", userID, groupID)
 	if err != nil {
 		return 0, err
 	}
@@ -83,38 +83,38 @@ func (db *TaxDB) GetUserTaxRate(userID, groupID int64) (float64, error) {
 func (db *TaxDB) SetUserTaxRate(userID, groupID int64, rate float64) error {
 	// 先尝试查找是否存在记录
 	var existing UserTaxRate
-	err := db.db.Find("user_tax_rates", &existing, "WHERE user_id = ? AND group_id = ?", userID, groupID)
+	err := db.Sqlite.Find("user_tax_rates", &existing, "WHERE user_id = ? AND group_id = ?", userID, groupID)
 	if err != nil {
 		// 如果记录不存在，则插入新记录
-		return db.db.Insert("user_tax_rates", &UserTaxRate{
+		return db.Sqlite.Insert("user_tax_rates", &UserTaxRate{
 			UserID:  userID,
 			GroupID: groupID,
 			Rate:    rate,
 		})
 	} else {
 		// 如果记录存在，则更新记录
-		return db.db.Update("user_tax_rates", &UserTaxRate{
+		return db.Sqlite.Update("user_tax_rates", &UserTaxRate{
 			ID:      existing.ID,
 			UserID:  userID,
 			GroupID: groupID,
 			Rate:    rate,
-		}, "WHERE user_id = ? AND group_id = ?", userID, groupID)
+		}, "WHERE id = ?", existing.ID)
 	}
 }
 
 func (db *TaxDB) InsertTreasuryLog(log TreasuryLog) error {
-	return db.db.Insert("treasury_logs", &log)
+	return db.Sqlite.Insert("treasury_logs", &log)
 }
 
 func (db *TaxDB) GetTreasuryTotal() (int, error) {
 	var total int
-	err := db.db.Count("treasury_logs", &total, "SELECT COALESCE(SUM(CASE WHEN operation IN ('INCOME', 'TAX_INCOME') THEN amount ELSE -amount END), 0) FROM treasury_logs")
+	err := db.Sqlite.Count("treasury_logs", &total, "SELECT COALESCE(SUM(CASE WHEN operation IN ('INCOME', 'TAX_INCOME') THEN amount ELSE -amount END), 0) FROM treasury_logs")
 	return total, err
 }
 
 func (db *TaxDB) GetTaxRankings(groupID int64, limit int) ([]TaxRecord, error) {
 	var records []TaxRecord
-	err := db.db.FindFor("tax_records", &records, 
+	err := db.Sqlite.FindFor("tax_records", &records, 
 		"WHERE group_id = ? GROUP BY user_id ORDER BY SUM(tax_amount) DESC LIMIT ?", 
 		groupID, limit)
 	return records, err
