@@ -11,9 +11,7 @@ import (
 	"time"
 
 	"github.com/FloatTech/AnimeAPI/wallet"
-	"github.com/FloatTech/floatbox/binary"
 	"github.com/FloatTech/floatbox/file"
-	"github.com/FloatTech/floatbox/process"
 	ctrl "github.com/FloatTech/zbpctrl"
 	"github.com/FloatTech/zbputils/control"
 	zero "github.com/wdvxdr1123/ZeroBot"
@@ -59,7 +57,7 @@ func init() {
 		PrivateDataFolder: "tax",
 	})
 
-	dbFile := engine.DataFolder() + "tax.db"
+	dbFile := engine.GetCustomDir("tax") + "/tax.db"
 	
 	go func() {
 		// 初始化数据库
@@ -75,7 +73,7 @@ func init() {
 		}
 		
 		// 尝试加载配置
-		loadConfig(engine.DataFolder() + "config.txt")
+		loadConfig(engine.GetCustomDir("tax") + "/config.txt")
 		
 		// 启动自动税收定时器
 		go autoTaxRoutine()
@@ -91,7 +89,7 @@ func init() {
 		taxConfig.Lock()
 		taxConfig.TaxRate = rate
 		taxConfig.Unlock()
-		saveConfig(engine.DataFolder() + "config.txt")
+		saveConfig(engine.GetCustomDir("tax") + "/config.txt")
 		ctx.SendChain(message.Text(fmt.Sprintf("税率已设置为%.2f%%", rate*100)))
 	})
 
@@ -105,7 +103,7 @@ func init() {
 		taxConfig.Lock()
 		taxConfig.Threshold = threshold
 		taxConfig.Unlock()
-		saveConfig(engine.DataFolder() + "config.txt")
+		saveConfig(engine.GetCustomDir("tax") + "/config.txt")
 		ctx.SendChain(message.Text(fmt.Sprintf("起征点已设置为%d", threshold)))
 	})
 
@@ -230,10 +228,10 @@ func autoTaxRoutine() {
 				
 				// 异步保存配置
 				go func() {
-					process.SleepAboutTime(1*time.Second)
+					time.Sleep(1 * time.Second) // 替换 process.SleepAboutTime
 					ctrlInfo, ok := control.Lookup("tax")
 					if ok {
-						saveConfig(ctrlInfo.DataFolder() + "config.txt")
+						saveConfig(ctrlInfo.GetDataFolder() + "config.txt") // 使用GetDataFolder替代DataFolder
 					}
 				}()
 			}
@@ -388,7 +386,10 @@ func saveConfig(path string) {
 	data := fmt.Sprintf("%.4f,%d,%s", taxConfig.TaxRate, taxConfig.Threshold, taxConfig.LastTaxDay)
 	taxConfig.RUnlock()
 	
-	_ = binary.WriteFile([]byte(data), path)
+	err := os.WriteFile(path, []byte(data), 0644) // 替换 binary.WriteFile
+	if err != nil {
+		logrus.Errorf("[tax] 保存配置失败: %v", err)
+	}
 }
 
 // 加载配置
@@ -398,8 +399,9 @@ func loadConfig(path string) {
 		return
 	}
 
-	data, err := file.GetLazyData(path, false, true)
+	data, err := os.ReadFile(path) // 替换 file.GetLazyData
 	if err != nil {
+		logrus.Errorf("[tax] 读取配置失败: %v", err)
 		return
 	}
 
