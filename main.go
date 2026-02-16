@@ -4,16 +4,18 @@ package tax
 import (
 	"fmt"
 	"math"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/FloatTech/AnimeAPI/wallet"
+	"github.com/FloatTech/floatbox/binary"
 	"github.com/FloatTech/floatbox/file"
+	"github.com/FloatTech/floatbox/process"
 	ctrl "github.com/FloatTech/zbpctrl"
 	"github.com/FloatTech/zbputils/control"
+	"github.com/FloatTech/zbputils/ctxext"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"
 	"github.com/sirupsen/logrus"
@@ -36,7 +38,7 @@ var (
 		Threshold:  defaultThreshold,
 		LastTaxDay: "",
 	}
-	taxDB TaxDB
+	db TaxDB
 )
 
 func init() {
@@ -57,23 +59,27 @@ func init() {
 		PrivateDataFolder: "tax",
 	})
 
-	dbFile := engine.GetCustomDir("tax") + "/tax.db"
+	cachePath := engine.DataFolder() + "cache/"
+	configFile := engine.DataFolder() + "config.txt"
+	dbFile := engine.DataFolder() + "tax.db"
 	
 	go func() {
+		_ = file.MkdirAll(cachePath)
+		
 		// 初始化数据库
-		err := taxDB.Open(dbFile)
+		err := db.Open(dbFile)
 		if err != nil {
 			panic(err)
 		}
 		
 		// 创建数据表
-		err = taxDB.CreateTables()
+		err = db.CreateTables()
 		if err != nil {
 			panic(err)
 		}
 		
 		// 尝试加载配置
-		loadConfig(engine.GetCustomDir("tax") + "/config.txt")
+		loadConfig(configFile)
 		
 		// 启动自动税收定时器
 		go autoTaxRoutine()
@@ -89,7 +95,7 @@ func init() {
 		taxConfig.Lock()
 		taxConfig.TaxRate = rate
 		taxConfig.Unlock()
-		saveConfig(engine.GetCustomDir("tax") + "/config.txt")
+		saveConfig(configFile)
 		ctx.SendChain(message.Text(fmt.Sprintf("税率已设置为%.2f%%", rate*100)))
 	})
 
@@ -103,7 +109,7 @@ func init() {
 		taxConfig.Lock()
 		taxConfig.Threshold = threshold
 		taxConfig.Unlock()
-		saveConfig(engine.GetCustomDir("tax") + "/config.txt")
+		saveConfig(configFile)
 		ctx.SendChain(message.Text(fmt.Sprintf("起征点已设置为%d", threshold)))
 	})
 
@@ -123,7 +129,7 @@ func init() {
 
 		if args == "" {
 			// 查询个人税率
-			rate, err := taxDB.GetUserTaxRate(uid, ctx.Event.GroupID)
+			rate, err := db.GetUserTaxRate(uid, ctx.Event.GroupID)
 			if err != nil {
 				taxConfig.RLock()
 				rate = taxConfig.TaxRate
@@ -137,7 +143,7 @@ func init() {
 				ctx.SendChain(message.Text("税率必须在0到1之间"))
 				return
 			}
-			err = taxDB.SetUserTaxRate(uid, ctx.Event.GroupID, rate)
+			err = db.SetUserTaxRate(uid, ctx.Event.GroupID, rate)
 			if err != nil {
 				ctx.SendChain(message.Text("设置个人税率失败: ", err))
 				return
@@ -148,7 +154,7 @@ func init() {
 
 	// 查看我的缴税记录
 	engine.OnFullMatch("查看我的缴税记录").SetBlock(true).Handle(func(ctx *zero.Ctx) {
-		records, err := taxDB.GetTaxRecordsByUserID(ctx.Event.UserID, 10)
+		records, err := db.GetTaxRecordsByUserID(ctx.Event.UserID, 10)
 		if err != nil || len(records) == 0 {
 			ctx.SendChain(message.Text("您还没有缴税记录"))
 			return
@@ -165,7 +171,7 @@ func init() {
 
 	// 查看税收排行榜
 	engine.OnFullMatch("查看税收排行榜").SetBlock(true).Handle(func(ctx *zero.Ctx) {
-		records, err := taxDB.GetTaxRankings(ctx.Event.GroupID, 10)
+		records, err := db.GetTaxRankings(ctx.Event.GroupID, 10)
 		if err != nil || len(records) == 0 {
 			ctx.SendChain(message.Text("暂无税收排行榜数据"))
 			return
@@ -195,7 +201,7 @@ func init() {
 
 	// 查看国库
 	engine.OnFullMatch("查看国库").SetBlock(true).Handle(func(ctx *zero.Ctx) {
-		treasury, err := taxDB.GetTreasuryTotal()
+		treasury, err := db.GetTreasuryTotal()
 		if err != nil {
 			treasury = 0
 		}
@@ -228,10 +234,10 @@ func autoTaxRoutine() {
 				
 				// 异步保存配置
 				go func() {
-					time.Sleep(1 * time.Second) // 替换 process.SleepAboutTime
+					process.SleepAboutTime(1*time.Second)
 					ctrlInfo, ok := control.Lookup("tax")
 					if ok {
-						saveConfig(ctrlInfo.GetDataFolder() + "config.txt") // 使用GetDataFolder替代DataFolder
+						saveConfig(ctrlInfo.GetDataFolder() + "config.txt")
 					}
 				}()
 			}
@@ -255,7 +261,7 @@ func collectTaxFromUser(uid int64, groupID int64, userName string) string {
 			userName, wallet.GetWalletName(), balance, threshold)
 	}
 
-	userTaxRate, err := taxDB.GetUserTaxRate(uid, groupID)
+	userTaxRate, err := db.GetUserTaxRate(uid, groupID)
 	if err != nil {
 		taxConfig.RLock()
 		userTaxRate = taxConfig.TaxRate
@@ -281,7 +287,7 @@ func collectTaxFromUser(uid int64, groupID int64, userName string) string {
 		UserName:  userName,
 	}
 	
-	if err := taxDB.InsertTaxRecord(record); err != nil {
+	if err := db.InsertTaxRecord(record); err != nil {
 		logrus.Warnf("[tax] 记录缴税历史失败: %v", err)
 	}
 
@@ -294,7 +300,7 @@ func collectTaxFromUser(uid int64, groupID int64, userName string) string {
 		Description: fmt.Sprintf("从用户 %s(%d) 征收税收", userName, uid),
 	}
 	
-	if err := taxDB.InsertTreasuryLog(logEntry); err != nil {
+	if err := db.InsertTreasuryLog(logEntry); err != nil {
 		logrus.Warnf("[tax] 记录国库日志失败: %v", err)
 	}
 
@@ -329,7 +335,7 @@ func collectTaxFromAllUsers(ctx *zero.Ctx) (int, int) {
             continue
         }
 
-        userTaxRate, err := taxDB.GetUserTaxRate(uid, ctx.Event.GroupID)
+        userTaxRate, err := db.GetUserTaxRate(uid, ctx.Event.GroupID)
         if err != nil {
             taxConfig.RLock()
             userTaxRate = taxConfig.TaxRate
@@ -356,7 +362,7 @@ func collectTaxFromAllUsers(ctx *zero.Ctx) (int, int) {
             UserName:  userName,
         }
         
-        if err := taxDB.InsertTaxRecord(record); err != nil {
+        if err := db.InsertTaxRecord(record); err != nil {
             continue
         }
 
@@ -369,7 +375,7 @@ func collectTaxFromAllUsers(ctx *zero.Ctx) (int, int) {
             Description: fmt.Sprintf("手动征收 - 从用户 %s(%d) 征收税收", userName, uid),
         }
         
-        if err := taxDB.InsertTreasuryLog(logEntry); err != nil {
+        if err := db.InsertTreasuryLog(logEntry); err != nil {
             continue
         }
         
@@ -386,10 +392,7 @@ func saveConfig(path string) {
 	data := fmt.Sprintf("%.4f,%d,%s", taxConfig.TaxRate, taxConfig.Threshold, taxConfig.LastTaxDay)
 	taxConfig.RUnlock()
 	
-	err := os.WriteFile(path, []byte(data), 0644) // 替换 binary.WriteFile
-	if err != nil {
-		logrus.Errorf("[tax] 保存配置失败: %v", err)
-	}
+	_ = binary.WriteFile([]byte(data), path)
 }
 
 // 加载配置
@@ -399,9 +402,8 @@ func loadConfig(path string) {
 		return
 	}
 
-	data, err := os.ReadFile(path) // 替换 file.GetLazyData
+	data, err := file.GetLazyData(path, false, true)
 	if err != nil {
-		logrus.Errorf("[tax] 读取配置失败: %v", err)
 		return
 	}
 
