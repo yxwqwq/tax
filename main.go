@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/FloatTech/AnimeAPI/wallet"
+	"github.com/FloatTech/floatbox/binary"
+	"github.com/FloatTech/floatbox/file"
+	"github.com/FloatTech/floatbox/process"
 	ctrl "github.com/FloatTech/zbpctrl"
 	"github.com/FloatTech/zbputils/control"
-	"github.com/FloatTech/zbputils/ctxext"
 	zero "github.com/wdvxdr1123/ZeroBot"
 	"github.com/wdvxdr1123/ZeroBot/message"
 	"github.com/sirupsen/logrus"
@@ -36,7 +38,7 @@ var (
 		Threshold:  defaultThreshold,
 		LastTaxDay: "",
 	}
-	taxDB *TaxDB
+	taxDB TaxDB
 )
 
 func init() {
@@ -61,8 +63,13 @@ func init() {
 	
 	go func() {
 		// 初始化数据库
-		var err error
-		taxDB, err = InitDatabase(dbFile)
+		err := taxDB.Open(dbFile)
+		if err != nil {
+			panic(err)
+		}
+		
+		// 创建数据表
+		err = taxDB.CreateTables()
 		if err != nil {
 			panic(err)
 		}
@@ -223,8 +230,11 @@ func autoTaxRoutine() {
 				
 				// 异步保存配置
 				go func() {
-					time.Sleep(1 * time.Second)
-					saveConfig(control.Lookup("tax").DataFolder() + "config.txt")
+					process.SleepAboutTime(1*time.Second)
+					ctrlInfo, ok := control.Lookup("tax")
+					if ok {
+						saveConfig(ctrlInfo.DataFolder() + "config.txt")
+					}
 				}()
 			}
 		}
@@ -378,23 +388,17 @@ func saveConfig(path string) {
 	data := fmt.Sprintf("%.4f,%d,%s", taxConfig.TaxRate, taxConfig.Threshold, taxConfig.LastTaxDay)
 	taxConfig.RUnlock()
 	
-	f, err := os.Create(path)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	
-	f.WriteString(data)
+	_ = binary.WriteFile([]byte(data), path)
 }
 
 // 加载配置
 func loadConfig(path string) {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	if !file.IsExist(path) {
 		// 如果配置不存在，使用默认值
 		return
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := file.GetLazyData(path, false, true)
 	if err != nil {
 		return
 	}
